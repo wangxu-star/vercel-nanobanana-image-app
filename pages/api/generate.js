@@ -1,16 +1,16 @@
 // Serverless API route: proxies requests to Google Gemini (Nano‑Banana) Generative API.
-// Keep your API key in an environment variable on Vercel: NANO_BANANA_API_KEY
+// Keep your API key in an environment variable on Vercel: GEMINI_API_KEY
 // Model used: gemini-2.5-flash-image-preview (change model id as needed)
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).send('Method not allowed')
   const { prompt, initImage } = req.body || {}
-  if (!process.env.NANO_BANANA_API_KEY) {
-    return res.status(500).json({ error: 'Server not configured. Set NANO_BANANA_API_KEY in environment.' })
+  if (!process.env.GEMINI_API_KEY) {
+    return res.status(500).json({ error: 'Server not configured. Set GEMINI_API_KEY in environment.' })
   }
 
   try {
-    const model = process.env.NANO_BANANA_MODEL || 'gemini-2.5-flash-image-preview'
+    const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash-image-preview'
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
 
     let imageBase64 = null
@@ -41,7 +41,7 @@ export default async function handler(req, res) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.NANO_BANANA_API_KEY}`
+        'Authorization': `Bearer ${process.env.GEMINI_API_KEY}`
       },
       body: JSON.stringify(payload),
     })
