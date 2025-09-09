@@ -4,14 +4,17 @@
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).send('Method not allowed')
+
   const { prompt, initImage } = req.body || {}
+
   if (!process.env.GEMINI_API_KEY) {
     return res.status(500).json({ error: 'Server not configured. Set GEMINI_API_KEY in environment.' })
   }
 
   try {
     const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash-image-preview'
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
+    // [修正 1] 将 API Key 添加到 URL 的查询参数中
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`
 
     let imageBase64 = null
     if (initImage) {
@@ -28,8 +31,9 @@ export default async function handler(req, res) {
 
     if (imageBase64) {
       contents[0].parts.push({
-        inline_image: {
-          mime_type: 'image/png',
+        // 注意：根据Gemini API，字段名应为 inlineData，而不是 inline_image
+        inlineData: {
+          mimeType: 'image/png',
           data: imageBase64
         }
       })
@@ -41,7 +45,7 @@ export default async function handler(req, res) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.GEMINI_API_KEY}`
+        // [修正 2] 移除了错误的 Authorization header
       },
       body: JSON.stringify(payload),
     })
@@ -56,32 +60,48 @@ export default async function handler(req, res) {
 
     let imageBase64Out = null
     try {
-      const body = json
-      const candidate = body?.candidates?.[0]
+      const candidate = json?.candidates?.[0]
       if (candidate) {
-        const parts = candidate.content?.parts || []
-        for (const p of parts) {
-          if (p.inline_data?.data) {
-            imageBase64Out = `data:image/png;base64,${p.inline_data.data}`
-            break
-          }
-          if (p.imageBytes) {
-            imageBase64Out = `data:image/png;base64,${p.imageBytes}`
-            break
-          }
-          if (typeof p === 'string' && p.startsWith('data:')) {
-            imageBase64Out = p
-            break
-          }
+        const part = candidate.content?.parts?.[0]
+        if (part?.inlineData?.data) {
+          // [修正 3] 简化了解析逻辑，直接针对 Gemini Vision Pro 的标准输出
+          imageBase64Out = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`
         }
-      }
-      if (!imageBase64Out) {
-        if (body?.output && typeof body.output === 'string' && body.output.startsWith('data:')) imageBase64Out = body.output
-        else if (body?.output_url) imageBase64Out = body.output_url
-        else if (body?.data?.[0]?.b64_json) imageBase64Out = `data:image/png;base64,${body.data[0].b64_json}`
       }
     } catch (e) {
       console.warn('Failed parsing upstream response for image data', e)
+    }
+
+    if (!imageBase64Out) {
+        // 作为备用方案，保留了更复杂的解析，以防万一
+        try {
+            const body = json
+            const candidate = body?.candidates?.[0]
+            if (candidate) {
+                const parts = candidate.content?.parts || []
+                for (const p of parts) {
+                    if (p.inline_data?.data) {
+                        imageBase64Out = `data:image/png;base64,${p.inline_data.data}`
+                        break
+                    }
+                    if (p.imageBytes) {
+                        imageBase64Out = `data:image/png;base64,${p.imageBytes}`
+                        break
+                    }
+                    if (typeof p === 'string' && p.startsWith('data:')) {
+                        imageBase64Out = p
+                        break
+                    }
+                }
+            }
+            if (!imageBase64Out) {
+                if (body?.output && typeof body.output === 'string' && body.output.startsWith('data:')) imageBase64Out = body.output
+                else if (body?.output_url) imageBase64Out = body.output_url
+                else if (body?.data?.[0]?.b64_json) imageBase64Out = `data:image/png;base64,${body.data[0].b64_json}`
+            }
+        } catch(e) {
+            console.warn('Fallback parsing failed', e)
+        }
     }
 
     if (!imageBase64Out) return res.status(500).json({ error: 'Could not parse upstream response for image', upstream: json || text })
